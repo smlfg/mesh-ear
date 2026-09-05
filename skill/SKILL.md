@@ -3,7 +3,7 @@ name: vorlesen
 description: Text auf Deutsch mit Thorsten (Piper) vorlesen — vorlesen/lies vor/TTS. Mesh-Ohr-Sperre, Status auf stderr, nie still scheitern.
 ---
 
-# vorlesen (Mesh-Ehr / Thorsten TTS)
+# vorlesen (Mesh-Ohr / Thorsten TTS)
 
 ## Wann diese Skill nutzen
 

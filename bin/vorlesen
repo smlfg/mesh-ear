@@ -9,6 +9,7 @@ SPEAK=""
 for c in \
   "$SCRIPT_DIR/pycoach-speak" \
   "$SCRIPT_DIR/pycoach-speak.linux" \
+  "$SCRIPT_DIR/pycoach-speak.macos" \
   "$HOME/.local/bin/pycoach-speak" \
   "$(command -v pycoach-speak 2>/dev/null || true)"; do
   if [[ -n "$c" && -x "$c" ]]; then

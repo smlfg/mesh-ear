@@ -33,14 +33,16 @@ install -m 755 "$SPEAK_SRC" "$BIN_DIR/pycoach-speak"
 
 add_path_block() {
   local rc="$1"
-  [[ -f "$rc" ]] || return 0
+  if [[ ! -f "$rc" ]]; then
+    touch "$rc"
+  fi
   if grep -qF "$PATH_MARKER" "$rc" 2>/dev/null; then
     return 0
   fi
   cat >>"$rc" <<EOF
 
 $PATH_MARKER
-if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
+if [[ ":\$PATH:" != *":$BIN_DIR:"* ]]; then
   export PATH="$BIN_DIR:\$PATH"
 fi
 EOF

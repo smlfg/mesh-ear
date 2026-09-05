@@ -42,12 +42,11 @@ _mesh_ear_is_local() {
 }
 
 mesh_ear_acquire() {
-  mkdir -p "$(dirname "$MESH_EAR_LOCKFILE")"
-  : >> "$MESH_EAR_LOCKFILE"
-
   echo "… warte auf Mesh-Ohr (eine Spur)" >&2
 
   if _mesh_ear_is_local; then
+    mkdir -p "$(dirname "$MESH_EAR_LOCKFILE")"
+    : >> "$MESH_EAR_LOCKFILE"
     MESH_EAR_MODE=local
     exec {MESH_EAR_FD}>>"$MESH_EAR_LOCKFILE"
     flock -x "$MESH_EAR_FD"
@@ -61,10 +60,10 @@ mesh_ear_acquire() {
   MESH_EAR_REMOTE_HOLD="/tmp/${MESH_EAR_TOKEN}.hold"
 
   ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=30 \
-    "$MESH_EAR_HOST" bash -s -- "$MESH_EAR_TOKEN" "$MESH_EAR_LOCKFILE" <<'REMOTE' &
+    "$MESH_EAR_HOST" bash -s -- "$MESH_EAR_TOKEN" <<'REMOTE' &
 set -euo pipefail
 token="$1"
-lockfile="$2"
+lockfile="${HOME}/.local/share/pycoach-tts/mesh-ear.lock"
 ready="/tmp/${token}.ready"
 hold="/tmp/${token}.hold"
 mkdir -p "$(dirname "$lockfile")"
@@ -119,7 +118,7 @@ mesh_ear_release() {
       if [[ -n "${MESH_EAR_SSH_PID:-}" ]]; then
         wait "$MESH_EAR_SSH_PID" 2>/dev/null || true
       fi
-      unset MESH_EAR_MODE MESH_EAR_TOKEN MESH_EAR_HOST MESH_EAR_SSH_PID
+      unset MESH_EAR_MODE MESH_EAR_TOKEN MESH_EAR_SSH_PID
       unset MESH_EAR_REMOTE_READY MESH_EAR_REMOTE_HOLD
       ;;
   esac
