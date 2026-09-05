@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "▶ Nachricht angenommen" >&2
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+SPEAK=""
+for c in \
+  "$SCRIPT_DIR/pycoach-speak" \
+  "$SCRIPT_DIR/pycoach-speak.linux" \
+  "$HOME/.local/bin/pycoach-speak" \
+  "$(command -v pycoach-speak 2>/dev/null || true)"; do
+  if [[ -n "$c" && -x "$c" ]]; then
+    SPEAK="$c"
+    break
+  fi
+done
+
+if [[ -z "$SPEAK" ]]; then
+  echo "vorlesen: pycoach-speak nicht gefunden" >&2
+  exit 1
+fi
+
+if [[ $# -gt 0 ]]; then
+  exec "$SPEAK" "$@"
+else
+  exec "$SPEAK"
+fi

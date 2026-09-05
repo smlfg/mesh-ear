@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOCK_SCRIPT=""
+for c in \
+  "$SCRIPT_DIR/mesh-ear-lock.sh" \
+  "$HOME/.local/bin/mesh-ear-lock.sh"; do
+  if [[ -f "$c" ]]; then
+    LOCK_SCRIPT="$c"
+    break
+  fi
+done
+
+if [[ -z "$LOCK_SCRIPT" ]]; then
+  echo "pycoach-speak: mesh-ear-lock.sh nicht gefunden" >&2
+  exit 1
+fi
+
+# shellcheck source=mesh-ear-lock.sh
+source "$LOCK_SCRIPT"
+
+TTS_DIR="${PYCOACH_TTS_DIR:-$HOME/.local/share/pycoach-tts}"
+MODEL_NAME="${PIPER_MODEL:-de_DE-thorsten-high}"
+MODEL_ONNX="$TTS_DIR/${MODEL_NAME}.onnx"
+MODEL_JSON="$TTS_DIR/${MODEL_NAME}.onnx.json"
+WAV_FILE=""
+USED_SAY=0
+
+cleanup() {
+  mesh_ear_release 2>/dev/null || true
+  if [[ -n "$WAV_FILE" && -f "$WAV_FILE" ]]; then
+    rm -f "$WAV_FILE"
+  fi
+}
+
+trap cleanup EXIT
+
+strip_markdown() {
+  local text="$1"
+  text="$(printf '%s' "$text" | sed -E 's/\[([^]]+)\]\([^)]+\)/\1/g')"
+  text="$(printf '%s' "$text" | sed -E 's/`([^`]+)`/\1/g')"
+  text="$(printf '%s' "$text" | sed -E 's/\*\*([^*]+)\*\*/\1/g; s/\*([^*]+)\*/\1/g; s/__([^_]+)__/\1/g; s/_([^_]+)_/\1/g')"
+  text="$(printf '%s' "$text" | sed -E 's/^#{1,6}[[:space:]]+//')"
+  text="$(printf '%s' "$text" | sed -E 's/^[-*+][[:space:]]+//; s/^>[[:space:]]*//')"
+  text="$(printf '%s' "$text" | tr -d '`#' )"
+  printf '%s' "$text" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^[[:space:]]+//; s/[[:space:]]+$//'
+}
+
+find_piper() {
+  local c
+  for c in \
+    "$(command -v piper 2>/dev/null || true)" \
+    "$HOME/.local/bin/piper" \
+    "/opt/homebrew/bin/piper" \
+    "/usr/local/bin/piper"; do
+    if [[ -n "$c" && -x "$c" ]]; then
+      printf '%s' "$c"
+      return 0
+    fi
+  done
+  return 1
+}
+
+read_input() {
+  if [[ $# -gt 0 ]]; then
+    printf '%s' "$*"
+  elif [[ ! -t 0 ]]; then
+    cat
+  else
+    echo "pycoach-speak: kein Text (Argumente oder stdin)" >&2
+    exit 1
+  fi
+}
+
+mesh_ear_acquire
+
+RAW="$(read_input "$@")"
+TEXT="$(strip_markdown "$RAW")"
+
+if [[ -z "$TEXT" ]]; then
+  echo "pycoach-speak: leerer Text nach Bereinigung" >&2
+  exit 1
+fi
+
+echo "… verarbeite" >&2
+
+PIPER="$(find_piper || true)"
+CAN_PIPER=0
+if [[ -n "$PIPER" && -f "$MODEL_ONNX" ]]; then
+  CAN_PIPER=1
+fi
+
+if (( CAN_PIPER )); then
+  mkdir -p "$TTS_DIR"
+  WAV_FILE="$(mktemp "${TTS_DIR}/vorlesen.XXXXXX.wav" 2>/dev/null || mktemp /tmp/vorlesen.XXXXXX.wav)"
+
+  PIPER_ARGS=(--model "$MODEL_ONNX" --output_file "$WAV_FILE")
+  if [[ -f "$MODEL_JSON" ]]; then
+    PIPER_ARGS+=(--config "$MODEL_JSON")
+  fi
+
+  printf '%s' "$TEXT" | "$PIPER" "${PIPER_ARGS[@]}"
+
+  if [[ ! -s "$WAV_FILE" ]]; then
+    echo "pycoach-speak: WAV-Erzeugung fehlgeschlagen, Fallback say" >&2
+    rm -f "$WAV_FILE"
+    WAV_FILE=""
+    CAN_PIPER=0
+  fi
+else
+  if [[ -z "$PIPER" ]]; then
+    echo "pycoach-speak: piper nicht verfügbar, Fallback say" >&2
+  elif [[ ! -f "$MODEL_ONNX" ]]; then
+    echo "pycoach-speak: Modell fehlt ($MODEL_ONNX), Fallback say" >&2
+  fi
+fi
+
+if (( CAN_PIPER )); then
+  echo "… Audio bereit" >&2
+  echo "▶ lese vor" >&2
+  afplay "$WAV_FILE"
+else
+  USED_SAY=1
+  echo "… Audio bereit" >&2
+  echo "▶ lese vor" >&2
+  say -v Anna "$TEXT" 2>/dev/null || say "$TEXT"
+fi
+
+echo "✓ fertig" >&2
