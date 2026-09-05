@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOCK_SCRIPT=""
+for c in \
+  "$SCRIPT_DIR/mesh-ear-lock.sh" \
+  "$HOME/.local/bin/mesh-ear-lock.sh"; do
+  if [[ -f "$c" ]]; then
+    LOCK_SCRIPT="$c"
+    break
+  fi
+done
+
+if [[ -z "$LOCK_SCRIPT" ]]; then
+  echo "pycoach-speak: mesh-ear-lock.sh nicht gefunden" >&2
+  exit 1
+fi
+
+# shellcheck source=mesh-ear-lock.sh
+source "$LOCK_SCRIPT"
+
+TTS_DIR="${PYCOACH_TTS_DIR:-$HOME/.local/share/pycoach-tts}"
+MODEL_NAME="${PIPER_MODEL:-de_DE-thorsten-high}"
+MODEL_ONNX="$TTS_DIR/${MODEL_NAME}.onnx"
+MODEL_JSON="$TTS_DIR/${MODEL_NAME}.onnx.json"
+WAV_FILE=""
+
+cleanup() {
+  mesh_ear_release 2>/dev/null || true
+  if [[ -n "$WAV_FILE" && -f "$WAV_FILE" ]]; then
+    rm -f "$WAV_FILE"
+  fi
+}
+
+trap cleanup EXIT
+
+strip_markdown() {
+  local text="$1"
+  # Links: [label](url) -> label
+  text="$(printf '%s' "$text" | sed -E 's/\[([^]]+)\]\([^)]+\)/\1/g')"
+  # Inline code
+  text="$(printf '%s' "$text" | sed -E 's/`([^`]+)`/\1/g')"
+  # Bold / italic
+  text="$(printf '%s' "$text" | sed -E 's/\*\*([^*]+)\*\*/\1/g; s/\*([^*]+)\*/\1/g; s/__([^_]+)__/\1/g; s/_([^_]+)_/\1/g')"
+  # ATX headers
+  text="$(printf '%s' "$text" | sed -E 's/^#{1,6}[[:space:]]+//')"
+  # Horizontal rules / list markers
+  text="$(printf '%s' "$text" | sed -E 's/^[-*+][[:space:]]+//; s/^>[[:space:]]*//')"
+  # Remaining backticks / hashes
+  text="$(printf '%s' "$text" | tr -d '`#' )"
+  # Collapse whitespace
+  printf '%s' "$text" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^[[:space:]]+//; s/[[:space:]]+$//'
+}
+
+find_piper() {
+  local c
+  for c in \
+    "$(command -v piper 2>/dev/null || true)" \
+    "$HOME/.local/bin/piper" \
+    "/usr/local/bin/piper"; do
+    if [[ -n "$c" && -x "$c" ]]; then
+      printf '%s' "$c"
+      return 0
+    fi
+  done
+  return 1
+}
+
+find_player() {
+  local p
+  for p in paplay ffplay mpv aplay; do
+    if command -v "$p" >/dev/null 2>&1; then
+      printf '%s' "$p"
+      return 0
+    fi
+  done
+  return 1
+}
+
+play_wav() {
+  local wav="$1"
+  local player
+  player="$(find_player)" || {
+    echo "pycoach-speak: kein Audio-Player (paplay/ffplay/mpv/aplay) gefunden" >&2
+    return 1
+  }
+
+  case "$player" in
+    paplay) paplay "$wav" ;;
+    ffplay) ffplay -nodisp -autoexit -loglevel quiet "$wav" ;;
+    mpv)    mpv --no-video --really-quiet "$wav" ;;
+    aplay)  aplay -q "$wav" 2>/dev/null || aplay "$wav" ;;
+  esac
+}
+
+read_input() {
+  if [[ $# -gt 0 ]]; then
+    printf '%s' "$*"
+  elif [[ ! -t 0 ]]; then
+    cat
+  else
+    echo "pycoach-speak: kein Text (Argumente oder stdin)" >&2
+    exit 1
+  fi
+}
+
+mesh_ear_acquire
+
+RAW="$(read_input "$@")"
+TEXT="$(strip_markdown "$RAW")"
+
+if [[ -z "$TEXT" ]]; then
+  echo "pycoach-speak: leerer Text nach Bereinigung" >&2
+  exit 1
+fi
+
+PIPER="$(find_piper)" || {
+  echo "pycoach-speak: piper nicht gefunden (pip install piper-tts oder Binary installieren)" >&2
+  exit 1
+}
+
+if [[ ! -f "$MODEL_ONNX" ]]; then
+  echo "pycoach-speak: Modell fehlt: $MODEL_ONNX" >&2
+  echo "Hinweis: de_DE-thorsten-high nach $TTS_DIR kopieren (siehe README)" >&2
+  exit 1
+fi
+
+echo "… verarbeite" >&2
+
+mkdir -p "$TTS_DIR"
+WAV_FILE="$(mktemp "${TTS_DIR}/vorlesen.XXXXXX.wav" 2>/dev/null || mktemp /tmp/vorlesen.XXXXXX.wav)"
+
+PIPER_ARGS=(--model "$MODEL_ONNX" --output_file "$WAV_FILE")
+if [[ -f "$MODEL_JSON" ]]; then
+  PIPER_ARGS+=(--config "$MODEL_JSON")
+fi
+
+printf '%s' "$TEXT" | "$PIPER" "${PIPER_ARGS[@]}"
+
+if [[ ! -s "$WAV_FILE" ]]; then
+  echo "pycoach-speak: WAV-Erzeugung fehlgeschlagen" >&2
+  exit 1
+fi
+
+echo "… Audio bereit" >&2
+echo "▶ lese vor" >&2
+
+play_wav "$WAV_FILE"
+
+echo "✓ fertig" >&2

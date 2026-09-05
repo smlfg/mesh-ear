@@ -1,0 +1,10 @@
+*.onnx
+*.onnx.json
+venv/
+.venv/
+__pycache__/
+*.wav
+*.raw
+audio/
+.DS_Store
+*.log
